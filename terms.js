@@ -33,7 +33,19 @@
    * an aside in brackets, and/or a comma clause ("X", when used in this
    * Agreement, means ...). Kept free of sentence-ending punctuation so it
    * cannot run across into the next sentence. */
-  var LEAD = '^(?:\\s*\\([^)\\r\\n]{0,80}\\))?(?:\\s*,[^.;!?\\r\\n]{0,160})?\\s*[,:\\u2013\\u2014-]?\\s*';
+  /* A qualifier can sit between the term and its verb with no comma at all:
+   *     “Knowledge” of the Borrower means …
+   *     “Knowledge” with respect to any Person means …
+   *     “Commitment” as used in this Agreement means …
+   * Without this only the comma form («“Knowledge”, when used …, means») is
+   * recognised, and the rest are silently missed. Bounded, and barred from
+   * crossing sentence punctuation so it cannot run into the next sentence. */
+  var QUALIFIER = '(?:\\s*(?:of|as\\s+to|for|as\\s+used|when\\s+used|as\\s+applied\\s+to|' +
+    'in\\s+relation\\s+to|in\\s+respect\\s+of|with\\s+respect\\s+to|with\\s+regard\\s+to)' +
+    '\\b[^.;:!?\\r\\n]{0,80})?';
+
+  var LEAD = '^(?:\\s*\\([^)\\r\\n]{0,80}\\))?' + QUALIFIER +
+             '(?:\\s*,[^.;!?\\r\\n]{0,160})?\\s*[,:\\u2013\\u2014-]?\\s*';
 
   /* "X" has the meaning given in Clause 1.1 — tested BEFORE the means pattern,
    * because "shall have the meaning" would otherwise be caught by it. */
@@ -41,8 +53,11 @@
     LEAD + '(?:shall\\s+have|has|have|shall\\s+bear|bears)\\s+the\\s+(?:respective\\s+)?meanings?\\b', 'i');
 
   /* "X" means / shall mean / will mean / means and includes */
+  /* "means" must precede "mean" in the alternation. Bare "mean" catches the
+   * plural-subject form: «References to the “Knowledge” of the Borrower mean …» */
   var MEANS_RE = new RegExp(
-    LEAD + '(?:means\\s+and\\s+includes|means|shall\\s+mean|will\\s+mean|shall\\s+be\\s+construed\\s+as)\\b', 'i');
+    LEAD + '(?:means\\s+and\\s+includes|means|shall\\s+mean|will\\s+mean|mean|' +
+    'shall\\s+be\\s+construed\\s+as)\\b', 'i');
 
   /* The clause a cross-reference points at. Captured now, followed later. */
   var POINTER_RE = new RegExp(
@@ -409,7 +424,7 @@
 
   var DEFINING_VERBS = 'means|shall\\s+mean|will\\s+mean|has\\s+the\\s+meaning|' +
     'shall\\s+have\\s+the\\s+meaning|is\\s+defined|are\\s+defined|' +
-    'shall\\s+be\\s+defined|refers\\s+to|shall\\s+refer\\s+to';
+    'shall\\s+be\\s+defined|refers\\s+to|shall\\s+refer\\s+to|mean';
 
   /* Does this sentence define THIS phrase? The verb must follow the phrase
    * itself — testing the sentence for a defining verb anywhere is not enough,
@@ -417,7 +432,8 @@
    * like a definition of Consolidated Net Income. */
   function definesPhrase(sentence, phrase) {
     var re = new RegExp('(?:^|[^A-Za-z0-9])' + escapeRegExp(phrase) +
-      '[”’\'"]?(?:\\s*,[^.;!?]{0,120})?\\s*(?:' + DEFINING_VERBS + ')\\b', 'i');
+      '[”’\'"]?' + QUALIFIER + '(?:\\s*,[^.;!?]{0,120})?\\s*(?:' +
+      DEFINING_VERBS + ')\\b', 'i');
     return re.test(sentence);
   }
 
@@ -488,11 +504,30 @@
     return out;
   }
 
+  /* Function words that start sentences and so get capitalised, gluing
+   * themselves to the term that follows: "No Material Adverse Effect has
+   * occurred" must yield "Material Adverse Effect".
+   *
+   * Kept deliberately short. Words that legitimately begin defined terms —
+   * Other Taxes, Available Commitment, Excluded Property, Reference Rate —
+   * must never appear here. */
+  var LEADING_FUNCTION_WORDS = ('the a an no any all each every such this that these those '
+    + 'both either neither if when upon unless until except whereas provided notwithstanding '
+    + 'accordingly however therefore moreover furthermore otherwise subject').split(' ');
+
   function cleanPhrase(raw) {
     var p = collapseSpace(raw)
-      .replace(/^(?:The|A|An)\s+/, '')     // "the Borrower" and "Borrower" are one thing
       .replace(/[’']s$/, '')          // possessive
       .replace(/[\s,.;:]+$/, '');
+
+    // Strip leading function words, repeatedly: "No Such Default" -> "Default".
+    for (var n = 0; n < 4; n++) {
+      var m = p.match(/^([A-Za-z]+)\s+(.+)$/);
+      if (!m || LEADING_FUNCTION_WORDS.indexOf(m[1].toLowerCase()) === -1) break;
+      p = m[2];
+    }
+    // A bare function word on its own is not a term.
+    if (LEADING_FUNCTION_WORDS.indexOf(p.toLowerCase()) !== -1) return '';
     // A trailing joining word means the regex over-reached: "Letter of".
     p = p.replace(/\s+(?:of|and|or|the|to|in|for|on|a|an)$/i, '');
     return p;

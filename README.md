@@ -18,6 +18,7 @@ task pane; **no document content is sent anywhere.**
 | `index.html` | The task pane itself. |
 | `taskpane.css` | Styling for the pane. |
 | `test.html` | **Pattern test bench.** Open in any browser, paste in a real agreement, see what gets found. No Word needed. |
+| `patterns.test.js` | Regression tests for the parser. Run `node patterns.test.js`. |
 | `manifest.xml` | Tells Word the add-in exists and where it lives. This is the file you install. |
 | `commands.html` | Required by the manifest. Does nothing yet. |
 | `assets/` | Icons. |
@@ -43,6 +44,30 @@ agreement, select all, copy, and paste it into the box. Press **Parse**.
 Do this before touching Word. Tuning the patterns is most of the work, and here
 the loop is "edit `terms.js`, refresh the page" instead of "re-upload, restart
 Word, clear cache".
+
+---
+
+### Finding terms the parser missed
+
+Scroll to **"Capitalised phrases the index can't explain"**. Any repeated Title
+Case phrase that isn't a known term (or part of one, or its plural) is listed,
+split into two groups:
+
+- **A. Looks like a definition the parser missed** — the phrase is followed by
+  *means* / *shall mean* / *has the meaning*, but it never got indexed. **These
+  are parser bugs.** Use the copy button and report them.
+- **B. Used but never defined** — no defining sentence anywhere. Mostly party
+  names and statutes, but it doubles as an undefined-terms check.
+
+### Before changing the patterns
+
+Run `node patterns.test.js` in the project folder. 33 checks, under a second,
+no setup.
+
+The patterns are deliberately loose, and loosening one to catch a missed term
+is an easy way to start matching things that aren't definitions. The test file
+has as many *negative* cases (quoted prose that must **not** be indexed) as
+positive ones. Run it before and after any change to `terms.js`.
 
 ---
 
