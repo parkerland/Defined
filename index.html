@@ -7,14 +7,18 @@
   <!-- Office.js must be loaded from Microsoft's CDN; this is how every add-in
        works. It carries no document content. See README "Privacy". -->
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1">
+  <link rel="stylesheet" href="taskpane.css?v=2">
 </head>
 <body>
 
   <header class="bar">
     <div class="bar-main">
       <h1>Defined</h1>
-      <button id="refresh" type="button" class="btn" title="Re-scan the document">Refresh</button>
+      <span class="bar-actions">
+        <button id="expand" type="button" class="btn ghost"
+                title="Give the definition the whole pane">Expand</button>
+        <button id="refresh" type="button" class="btn" title="Re-scan the document">Refresh</button>
+      </span>
     </div>
     <div class="bar-sub">
       <span id="status">Starting…</span>
@@ -45,7 +49,7 @@
     <div id="diag-body">Nothing yet.</div>
   </details>
 
-  <script src="terms.js?v=1"></script>
-  <script src="app.js?v=1"></script>
+  <script src="terms.js?v=2"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>

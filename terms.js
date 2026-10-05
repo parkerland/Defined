@@ -371,8 +371,164 @@
     return null;
   }
 
+  /* ---------------------------------------------------------------------
+   * Suspects — finding terms the parser MISSED
+   *
+   * Guessing which patterns to add doesn't scale. This inverts the problem:
+   * in a legal document a repeated Title Case phrase is almost always a
+   * defined term, so any capitalised phrase the index can't account for is
+   * worth a look. Real misses rise to the top because they repeat.
+   *
+   * Noisy by design — it is a diagnostic, not a feature. Party names and
+   * statutes will appear alongside genuine misses.
+   * ------------------------------------------------------------------- */
+
+  /* Runs of capitalised words, with lowercase joining words allowed inside
+   * ("Letter of Credit", "Board of Directors"). Repetition is bounded. */
+  var SUSPECT_RE = new RegExp(
+    '[A-Z][A-Za-z0-9&’\'\\-]*' +
+    '(?:\\s+(?:of|and|or|the|to|in|for|on|a|an)\\s+[A-Z][A-Za-z0-9&’\'\\-]*' +
+    '|\\s+[A-Z][A-Za-z0-9&’\'\\-]*){0,6}', 'g');
+
+  /* Words that start sentences, so a one-word "phrase" beginning with one of
+   * these is just normal prose, not a term. */
+  var SENTENCE_STARTERS = ('the a an this that these those such any all each no none both either '
+    + 'neither if in on at to for from by with without upon under over after before during '
+    + 'notwithstanding provided subject except unless until while whereas therefore accordingly '
+    + 'furthermore moreover however otherwise it its they their he she his her we our you your '
+    + 'there here when where which who whom whose what why how is are was were be been being '
+    + 'shall will may must can should would could has have had do does did not and or but '
+    + 'no section clause article schedule exhibit annex appendix paragraph part chapter page '
+    + 'table article references reference').split(' ');
+
+  var MONTHS = ('january february march april may june july august september october november '
+    + 'december monday tuesday wednesday thursday friday saturday sunday').split(' ');
+
+  /* Structural cross-references: "Section 6.05", "Schedule 1", "Article VII". */
+  var STRUCTURAL_RE = /^(section|clause|article|schedule|exhibit|annex|appendix|paragraph|part|chapter|page|table)\b/i;
+
+  var DEFINING_VERBS = 'means|shall\\s+mean|will\\s+mean|has\\s+the\\s+meaning|' +
+    'shall\\s+have\\s+the\\s+meaning|is\\s+defined|are\\s+defined|' +
+    'shall\\s+be\\s+defined|refers\\s+to|shall\\s+refer\\s+to';
+
+  /* Does this sentence define THIS phrase? The verb must follow the phrase
+   * itself — testing the sentence for a defining verb anywhere is not enough,
+   * because «"EBITDA" shall mean … Consolidated Net Income …» would then look
+   * like a definition of Consolidated Net Income. */
+  function definesPhrase(sentence, phrase) {
+    var re = new RegExp('(?:^|[^A-Za-z0-9])' + escapeRegExp(phrase) +
+      '[”’\'"]?(?:\\s*,[^.;!?]{0,120})?\\s*(?:' + DEFINING_VERBS + ')\\b', 'i');
+    return re.test(sentence);
+  }
+
+  function singularise(key) {
+    if (/ies$/.test(key)) return key.slice(0, -3) + 'y';
+    if (/ses$/.test(key)) return key.slice(0, -2);
+    if (/s$/.test(key) && !/ss$/.test(key)) return key.slice(0, -1);
+    return key;
+  }
+
+  /**
+   * Capitalised phrases that the index does not explain.
+   * @param {string[]} paragraphs
+   * @param {object} index - from buildIndex
+   * @param {object} [options] - { minCount: 2 }
+   * @returns {Array} [{ phrase, key, count, sample, paragraph }] by count desc
+   */
+  function findSuspects(paragraphs, index, options) {
+    var minCount = options && options.minCount ? options.minCount : 2;
+    var list = paragraphs || [];
+    var seen = {};
+    var i;
+
+    for (i = 0; i < list.length; i++) {
+      var text = String(list[i] == null ? '' : list[i]).replace(/\r/g, '');
+      if (!text) continue;
+      SUSPECT_RE.lastIndex = 0;
+      var m;
+      while ((m = SUSPECT_RE.exec(text)) !== null) {
+        var phrase = cleanPhrase(m[0]);
+        if (!phrase) continue;
+        var key = keyFor(phrase);
+        if (!isSuspect(phrase, key, index)) continue;
+
+        if (!seen[key]) {
+          seen[key] = { phrase: phrase, key: key, count: 0,
+                        paragraph: i, sample: '', defining: false };
+        }
+        var entry = seen[key];
+        entry.count++;
+
+        /* Prefer a sentence that looks like a definition over the first
+         * occurrence: that is the sentence you need in order to write the
+         * missing pattern. Stop looking once one is found. */
+        if (!entry.defining) {
+          var s = sentenceStart(text, m.index);
+          var e = sentenceEnd(text, m.index + m[0].length);
+          var sentence = collapseSpace(text.slice(s, e));
+          var defining = definesPhrase(sentence, phrase);
+          if (defining || !entry.sample) {
+            entry.sample = sentence.slice(0, 240);
+            entry.paragraph = i;
+            entry.defining = defining;
+          }
+        }
+      }
+    }
+
+    var out = [];
+    for (var k in seen) {
+      if (!Object.prototype.hasOwnProperty.call(seen, k)) continue;
+      if (seen[k].count >= minCount) out.push(seen[k]);
+    }
+    out.sort(function (a, b) {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+    });
+    return out;
+  }
+
+  function cleanPhrase(raw) {
+    var p = collapseSpace(raw)
+      .replace(/^(?:The|A|An)\s+/, '')     // "the Borrower" and "Borrower" are one thing
+      .replace(/[’']s$/, '')          // possessive
+      .replace(/[\s,.;:]+$/, '');
+    // A trailing joining word means the regex over-reached: "Letter of".
+    p = p.replace(/\s+(?:of|and|or|the|to|in|for|on|a|an)$/i, '');
+    return p;
+  }
+
+  function isSuspect(phrase, key, index) {
+    if (!key || key.length < 3) return false;
+    if (!/[A-Za-z]/.test(key)) return false;
+    if (STRUCTURAL_RE.test(key)) return false;
+
+    var words = key.split(' ');
+    if (words.length > 7) return false;
+    if (words.length === 1) {
+      if (SENTENCE_STARTERS.indexOf(key) !== -1) return false;
+      if (MONTHS.indexOf(key) !== -1) return false;
+      if (key.length < 4) return false;        // "Co", "Inc"
+    }
+
+    if (!index) return true;
+
+    // Already defined, in singular or plural form.
+    if (index.byKey[key]) return false;
+    var sing = singularise(key);
+    if (sing !== key && index.byKey[sing]) return false;
+
+    // Part of a longer defined term: "Material Adverse" inside
+    // "Material Adverse Effect" is not a separate miss.
+    for (var i = 0; i < index.terms.length; i++) {
+      if (index.terms[i].key.indexOf(key) !== -1) return false;
+    }
+    return true;
+  }
+
   root.DefinedTerms = {
     buildIndex: buildIndex,
+    findSuspects: findSuspects,
     lookup: lookup,
     candidatesIn: candidatesIn,
     matchSelectionText: matchSelectionText,

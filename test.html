@@ -84,6 +84,46 @@
   <tbody></tbody>
 </table>
 
+<h2>Capitalised phrases the index can&rsquo;t explain</h2>
+<p class="lede">
+  This is how you find terms the parser missed. Any repeated Title Case phrase
+  that isn&rsquo;t a known term (or part of one, or its plural) is listed here,
+  most frequent first.
+</p>
+<div class="row">
+  <label>Ignore phrases appearing fewer than
+    <input type="text" id="minCount" value="2" size="3"> times</label>
+  <button id="rescan" class="ghost">Update</button>
+</div>
+
+<h3 style="font-size:13.5px;margin:18px 0 4px">
+  A. Looks like a definition the parser missed
+</h3>
+<p class="lede" style="margin-bottom:6px">
+  The phrase is followed by <em>means</em> / <em>shall mean</em> / <em>has the
+  meaning</em> somewhere in the document, but it never got indexed &mdash;
+  usually because the term isn&rsquo;t in quotes. <strong>These are parser
+  bugs.</strong> Send me the sentence and I&rsquo;ll add the pattern.
+</p>
+<table id="missed">
+  <thead><tr><th>Phrase</th><th>Times</th><th>Apparent defining sentence</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h3 style="font-size:13.5px;margin:18px 0 4px">
+  B. Used but never defined
+</h3>
+<p class="lede" style="margin-bottom:6px">
+  No defining sentence found anywhere. Mostly party names, statutes and
+  ordinary capitalised prose &mdash; but a genuine defined term appearing here
+  is worth a look, and a capitalised term a document never defines is itself a
+  drafting point.
+</p>
+<table id="undefined">
+  <thead><tr><th>Phrase</th><th>Times</th><th>First use</th></tr></thead>
+  <tbody></tbody>
+</table>
+
 <h2>Click simulator</h2>
 <p class="lede">
   Type a word you might double-click in the document, and the paragraph number
@@ -97,7 +137,7 @@
   <span id="simOut"></span>
 </div>
 
-<script src="terms.js?v=1"></script>
+<script src="terms.js?v=2"></script>
 <script>
 (function () {
   'use strict';
@@ -119,7 +159,9 @@
     'The parties agree that “time is of the essence” with respect to each payment obligation hereunder.',
     'No Loan Party shall “double count” any amount in any calculation made under this Section 6.12.',
     'Reference is made to the “Credit Agreement” dated as of March 1, 2024, among the parties hereto.',
-    '“2026 Notes” means the 5.25% senior unsecured notes due 2026 issued by the Borrower under the 2026 Notes Indenture.'
+    '“2026 Notes” means the 5.25% senior unsecured notes due 2026 issued by the Borrower under the 2026 Notes Indenture.',
+    'Consolidated Net Income shall mean, for any period, the net income of the Borrower and the Subsidiaries determined on a consolidated basis in accordance with GAAP.',
+    'The Borrower shall not permit the Leverage Ratio to exceed 3.50 to 1.00 as of the last day of any fiscal quarter. The Leverage Ratio shall be calculated on a pro forma basis. Any failure to comply with the Leverage Ratio shall constitute an Event of Default.'
   ].join('\n');
 
   var KIND_LABEL = { means:'means', crossref:'cross-reference',
@@ -156,6 +198,37 @@
 
     renderFound();
     renderRejected();
+    renderSuspects();
+  }
+
+  /* Phrases the index cannot account for, split by whether the document
+     appears to define them. Group A are parser gaps; group B are not. */
+  function renderSuspects() {
+    var min = parseInt(document.getElementById('minCount').value, 10);
+    if (isNaN(min) || min < 1) min = 1;
+    var suspects = T.findSuspects(paras, index, { minCount: min });
+
+    function rows(items, emptyMsg) {
+      if (!items.length) return '<tr><td colspan="3">' + emptyMsg + '</td></tr>';
+      return items.map(function (s) {
+        return '<tr><td class="term">' + esc(s.phrase) + '</td>' +
+               '<td>' + s.count + '</td>' +
+               '<td class="def">' + esc(clip(s.sample, 200)) +
+               '<br><small style="color:#5c6070">para ' + (s.paragraph+1) + '</small></td></tr>';
+      }).join('');
+    }
+
+    var missed = suspects.filter(function (s) { return s.defining; });
+    var undef  = suspects.filter(function (s) { return !s.defining; });
+
+    document.querySelector('#missed tbody').innerHTML =
+      rows(missed, 'None — every apparent definition was indexed.');
+    document.querySelector('#undefined tbody').innerHTML =
+      rows(undef.slice(0, 80), 'None.') +
+      (undef.length > 80
+        ? '<tr><td colspan="3"><small>…and ' + (undef.length - 80) +
+          ' more below the display limit.</small></td></tr>'
+        : '');
   }
 
   function renderFound() {
@@ -225,6 +298,7 @@
   }
 
   document.getElementById('parse').addEventListener('click', parse);
+  document.getElementById('rescan').addEventListener('click', renderSuspects);
   document.getElementById('simRun').addEventListener('click', simulate);
   document.getElementById('sample').addEventListener('click', function () {
     document.getElementById('input').value = SAMPLE;
@@ -233,8 +307,9 @@
   document.getElementById('clear').addEventListener('click', function () {
     document.getElementById('input').value = '';
     document.getElementById('stats').textContent = 'Not parsed yet.';
-    document.querySelector('#found tbody').innerHTML = '';
-    document.querySelector('#rejected tbody').innerHTML = '';
+    ['#found', '#rejected', '#missed', '#undefined'].forEach(function (sel) {
+      document.querySelector(sel + ' tbody').innerHTML = '';
+    });
   });
 
   document.getElementById('input').value = SAMPLE;

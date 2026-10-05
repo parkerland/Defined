@@ -31,6 +31,7 @@
   Office.onReady(function (info) {
     el.status = document.getElementById('status');
     el.refresh = document.getElementById('refresh');
+    el.expand = document.getElementById('expand');
     el.follow = document.getElementById('follow');
     el.definition = document.getElementById('definition');
     el.search = document.getElementById('search');
@@ -44,6 +45,11 @@
     }
 
     el.refresh.addEventListener('click', function () { scan(); });
+
+    el.expand.addEventListener('click', function () {
+      var on = document.body.classList.toggle('expanded');
+      el.expand.textContent = on ? 'Show list' : 'Expand';
+    });
 
     el.search.addEventListener('input', function () {
       clearTimeout(searchTimer);

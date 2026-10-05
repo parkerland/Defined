@@ -67,6 +67,12 @@ body {
   gap: 8px;
 }
 
+.bar-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .bar h1 {
   margin: 0;
   font-size: 15px;
@@ -118,19 +124,33 @@ body {
 .btn:hover { filter: brightness(1.12); }
 .btn:disabled { opacity: 0.55; cursor: default; filter: none; }
 
+.btn.ghost {
+  color: var(--text);
+  background: transparent;
+  border-color: var(--line);
+}
+
 @media (prefers-color-scheme: dark) {
   .btn { color: #16181d; }
 }
 
 /* ---------- definition card ---------- */
 
+/* The definition and the list split the pane 3:2 and each scroll internally.
+   flex-basis MUST be 0 rather than auto: with auto, the 100+ item list has a
+   huge content height, flexbox shrinks the definition to nothing, and you see
+   a single line. min-height stops it collapsing in a very short pane. */
 .definition {
-  flex: 0 1 auto;
-  max-height: 46%;
+  flex: 3 1 0;
+  min-height: 110px;
   overflow-y: auto;
   padding: 12px;
   border-bottom: 1px solid var(--line);
 }
+
+/* "Expand" hides the list so a long definition gets the whole pane. */
+body.expanded .browse { display: none; }
+body.expanded .definition { flex: 1 1 auto; }
 
 .definition .empty {
   color: var(--text-dim);
@@ -203,10 +223,10 @@ body {
 /* ---------- browse list ---------- */
 
 .browse {
-  flex: 1 1 auto;
+  flex: 2 1 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 92px;
   padding: 10px 12px 0;
 }
 
