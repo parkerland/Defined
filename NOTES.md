@@ -94,9 +94,13 @@ GitHub Pages serves <https://parkerland.github.io/Defined/> from `main`.
   `index.html` (and `test.html` for `terms.js`), or Word serves the old file.
 - Pages builds are usually under a minute but have taken up to nine. If the
   pane looks unchanged, check the build finished before suspecting the code.
+- **Builds fail intermittently** with a bare "Page build failed." and no
+  detail. Seen twice, both transient — requesting a rebuild
+  (`gh api -X POST repos/parkerland/Defined/pages/builds`) fixed it both
+  times. Don't go hunting in the code for this one.
 - Stale after a successful build? `Ctrl+Shift+R` on the web; on desktop delete
   everything in `%LOCALAPPDATA%\Microsoft\Office\16.0\Wef\` with Word closed.
 
-**State at stop:** commit `71f9810` pushed; its Pages build was still running.
-Verify the live site serves `?v=6` and that `terms.js` contains
-`resolveOverlaps` before concluding anything is broken.
+**State at stop:** commit `b0de077`, built and live. Verified the site serves
+`?v=6` and `terms.js` contains `resolveOverlaps`, so the click-by-position fix
+is deployed. Nothing left half-finished.
