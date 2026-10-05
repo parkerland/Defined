@@ -219,6 +219,69 @@ definesNothing('quoted sentence',
 })();
 
 /* ------------------------------------------------------------------ *
+ * 6c. Clicking where terms overlap                                     *
+ *                                                                      *
+ * "Business", "Business Day" and "Business Employee(s)" can all be     *
+ * defined, and the word "Business" belongs to all three. Which one you *
+ * meant depends on WHERE you clicked. Word supplies the relations; the *
+ * simulation below stands in for it so the rules can be tested here.   *
+ * ------------------------------------------------------------------ */
+(function clickResolution() {
+  const idx = T.buildIndex([
+    '“Business” means the business of designing and selling widgets.',
+    '“Business Employee(s)” means each employee of the Business listed on Schedule 2.1(a).',
+    '“Business Day” means any day except a Saturday, Sunday or public holiday.',
+  ]);
+  const para = 'The Buyer shall offer employment to the Business Employees within '
+             + 'three Business Days after the Closing, and shall continue to operate the Business.';
+
+  /* What Word reports for a found range [s,e) against a caret at c. */
+  const relation = (s, e, c) =>
+    c > s && c < e ? 'Contains' :
+    c === s ? 'ContainsStart' :
+    c === e ? 'ContainsEnd' :
+    c < s ? 'After' : 'Before';
+
+  function clickAt(caret) {
+    const comparisons = [];
+    for (const c of T.candidatesIn(para, idx)) {
+      let from = 0, at;
+      while ((at = para.indexOf(c.surface, from)) !== -1) {
+        comparisons.push({ entry: c.entry, surface: c.surface,
+                           relation: relation(at, at + c.surface.length, caret) });
+        from = at + 1;
+      }
+    }
+    return T.resolveOverlaps(comparisons);
+  }
+
+  const cases = [
+    ['inside "Business" of "Business Employees"', para.indexOf('Business Employees') + 3, 'Business Employee(s)'],
+    ['inside "Employees"',                        para.indexOf('Employees') + 4,          'Business Employee(s)'],
+    ['inside "Business" of "Business Days"',      para.indexOf('Business Days') + 3,      'Business Day'],
+    ['inside "Days"',                             para.indexOf('Business Days') + 11,     'Business Day'],
+    ['inside standalone "Business"',              para.lastIndexOf('Business') + 3,       'Business'],
+    ['inside "Buyer", not a defined term',        para.indexOf('Buyer') + 2,              null],
+  ];
+  for (const [label, caret, expected] of cases) {
+    const r = clickAt(caret);
+    const got = r ? r.entry.term : null;
+    check('click ' + label, got === expected, `expected ${expected}, got ${got}`);
+  }
+
+  // The ambiguous spot must offer the alternative rather than hide it.
+  const amb = clickAt(para.indexOf('Business Employees') + 3);
+  check('overlapping click offers the other term',
+        amb.others.length === 1 && amb.others[0].term === 'Business',
+        `got [${amb.others.map(o => o.term).join(', ')}]`);
+
+  // The unambiguous one must not invent alternatives.
+  const plain = clickAt(para.lastIndexOf('Business') + 3);
+  check('unambiguous click offers nothing extra',
+        plain.others.length === 0, `got [${plain.others.map(o => o.term).join(', ')}]`);
+})();
+
+/* ------------------------------------------------------------------ *
  * 7. Suspects — the missed-term diagnostic                            *
  * ------------------------------------------------------------------ */
 (function conjoinedTermsAreNotNewTerms() {

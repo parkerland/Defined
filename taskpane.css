@@ -207,6 +207,30 @@ body.expanded .definition { flex: 1 1 auto; }
   color: var(--text-dim);
 }
 
+/* Other defined terms overlapping the clicked word. */
+.also {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 9px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.chip:hover { border-color: var(--accent); }
+
 .alt {
   margin-top: 10px;
   padding-top: 8px;

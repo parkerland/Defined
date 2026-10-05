@@ -19,8 +19,13 @@
   var lastError = null;
 
   var MAX_LISTED = 300;      // cap list rendering so typing stays snappy
-  var MAX_CANDIDATES = 18;   // per-paragraph Word searches per click
-                             // (a term contributes several surface forms)
+  /* Word searches issued per click. They all go in one batch, so the cost is
+   * one round trip regardless of count. This was 18, which a dense paragraph
+   * blew through easily — each term contributes 2-3 surface forms, so 18 is
+   * only about six terms. Candidates are ordered by length, not by distance
+   * from the cursor, so overflowing the cap drops terms arbitrarily and the
+   * click silently does nothing. */
+  var MAX_CANDIDATES = 60;
   var DEBOUNCE_MS = 180;
 
   var el = {};
@@ -61,6 +66,13 @@
       var li = ev.target.closest ? ev.target.closest('li[data-key]') : null;
       if (!li) return;
       showTerm(index && index.byKey[li.getAttribute('data-key')]);
+    });
+
+    // "Also here" chips are rebuilt with the card, so delegate.
+    el.definition.addEventListener('click', function (ev) {
+      var chip = ev.target.closest ? ev.target.closest('.chip[data-key]') : null;
+      if (!chip) return;
+      showTerm(index && index.byKey[chip.getAttribute('data-key')]);
     });
 
     registerSelectionHandler();
@@ -144,26 +156,35 @@
         var paraText = selParas.items.length ? selParas.items[0].text : '';
         var selText = (sel.text || '').replace(/^\s+|\s+$/g, '');
 
-        /* Fast path: the user double-clicked or dragged a selection, so we
-         * have actual text to match and never need to ask Word anything. */
-        if (selText) {
-          var direct = DefinedTerms.matchSelectionText(selText, index, paraText);
-          if (direct) return direct;
-        }
-        if (!paraText) return null;
-
-        /* Caret path. Office.js has no "expand selection to the whole phrase",
-         * so we invert the problem: we already know every defined term, so we
-         * ask Word to find the ones present in this paragraph and report which
-         * of their ranges contains the cursor. Multi-word terms like
-         * "Material Adverse Effect" fall out of this for free. */
-        /* candidatesIn returns { entry, surface }: the surface is the form the
+        /* Position decides, not text.
+         *
+         * Matching the selected text alone cannot tell WHICH occurrence you
+         * clicked. In «offer employment to the Business Employees … operate
+         * the Business», the word "Business" belongs to two different terms,
+         * and a text match always returned the same one. So we ask Word where
+         * the cursor actually is, for clicks and double-clicks alike.
+         *
+         * Office.js has no "expand selection to the whole phrase", so we
+         * invert it: we know every term already, so we have Word find the
+         * ones present in this paragraph and report which of their ranges
+         * contains the cursor. Multi-word terms come out for free.
+         *
+         * candidatesIn gives { entry, surface } — the surface is the form the
          * text actually uses, which is what Word must search for. A term
          * defined as "Business Employee(s)" is written "Business Employees". */
-        var candidates = DefinedTerms.candidatesIn(paraText, index)
-          .filter(searchable)
-          .slice(0, MAX_CANDIDATES);
+        if (!paraText) {
+          return selText
+            ? wrap(DefinedTerms.matchSelectionText(selText, index, ''))
+            : null;
+        }
+
+        var allHere = DefinedTerms.candidatesIn(paraText, index).filter(searchable);
+        var candidates = allHere.slice(0, MAX_CANDIDATES);
         if (!candidates.length) return null;
+        if (allHere.length > candidates.length) {
+          note('Paragraph has ' + allHere.length + ' term forms; only the ' +
+               candidates.length + ' longest were searched.');
+        }
 
         /* These two objects are used again after the next sync. Untracked
          * proxies can go stale between batches, so pin them for the rest of
@@ -195,13 +216,27 @@
           if (!comparisons.length) return null;
 
           return ctx.sync().then(function () {
-            return pickBest(comparisons);
+            /* The ranking lives in terms.js so it can be tested without
+             * Word; all it needs is the relation name Word produced. */
+            var resolved = DefinedTerms.resolveOverlaps(
+              comparisons.map(function (c) {
+                return { entry: c.entry, surface: c.surface,
+                         relation: c.relation.value };
+              }));
+            if (resolved) return resolved;
+            /* Nothing's range contained the cursor — fall back to matching
+             * the selected text, which at least handles a double-click. */
+            note('No term range contained the cursor; searched ' +
+                 candidates.length + ' form(s) in this paragraph.');
+            return selText
+              ? wrap(DefinedTerms.matchSelectionText(selText, index, paraText))
+              : null;
           });
         });
       });
     })
-    .then(function (entry) {
-      if (entry) showTerm(entry);
+    .then(function (result) {
+      if (result && result.entry) showTerm(result.entry, result.others);
     })
     .catch(function (err) {
       /* A click in a header, footer or comment throws rather than returning
@@ -214,37 +249,8 @@
     });
   }
 
-  /* How a found range sits relative to the cursor. Lower rank = better match.
-   * Word reports these from the found range's point of view, so a cursor
-   * sitting inside "Material Adverse Effect" gives Contains. */
-  var RELATION_RANK = {
-    Equal: 0,
-    Contains: 0,
-    ContainsStart: 1,
-    ContainsEnd: 1,
-    Inside: 2,
-    InsideStart: 2,
-    InsideEnd: 2,
-    OverlapsBefore: 3,
-    OverlapsAfter: 3,
-    AdjacentBefore: 4,   // cursor resting just after the term
-    AdjacentAfter: 4     // cursor resting just before it
-  };
-
-  function pickBest(comparisons) {
-    var best = null;
-    for (var i = 0; i < comparisons.length; i++) {
-      var c = comparisons[i];
-      var rank = RELATION_RANK[c.relation.value];
-      if (rank === undefined) continue;
-      // Tighter relation wins; ties go to the longer matched text, so clicking
-      // inside "Material Adverse Effect" never resolves to "Material".
-      if (!best || rank < best.rank ||
-          (rank === best.rank && c.surface.length > best.surface.length)) {
-        best = { rank: rank, entry: c.entry, surface: c.surface };
-      }
-    }
-    return best ? best.entry : null;
+  function wrap(entry) {
+    return entry ? { entry: entry, others: [] } : null;
   }
 
   /* Word's search treats ^ as an escape character and caps the string at 255
@@ -257,10 +263,10 @@
    * Rendering
    * =================================================================== */
 
-  function showTerm(entry) {
+  function showTerm(entry, others) {
     if (!entry) return;
     activeKey = entry.key;
-    renderDefinition(entry);
+    renderDefinition(entry, others);
     markActiveInList();
   }
 
@@ -271,7 +277,7 @@
     'inline?': 'inline (uncertain)'
   };
 
-  function renderDefinition(entry) {
+  function renderDefinition(entry, others) {
     if (!entry) {
       if (index && !index.terms.length) {
         el.definition.innerHTML =
@@ -295,6 +301,16 @@
         '<span class="badge' + weak + '">' + esc(KIND_LABEL[entry.kind] || entry.kind) + '</span>' +
       '</div>' +
       '<div class="term-body">' + highlight(entry.text, entry.term) + '</div>';
+
+    /* Overlapping terms at the same spot. "Business Employees" contains
+     * "Business", and which one you meant is genuinely ambiguous — so offer
+     * the other rather than quietly choosing. */
+    if (others && others.length) {
+      html += '<div class="also">Also here: ' + others.map(function (o) {
+        return '<button type="button" class="chip" data-key="' +
+               esc(o.key) + '">' + esc(o.term) + '</button>';
+      }).join('') + '</div>';
+    }
 
     var meta = [];
     if (entry.pointer) meta.push('Points to ' + esc(entry.pointer));

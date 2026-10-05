@@ -696,9 +696,67 @@
     return true;
   }
 
+  /* --------------------------------------------------------------------- *
+   * Resolving a click when terms overlap
+   *
+   * "Business", "Business Day" and "Business Employee(s)" can all be defined,
+   * and the word "Business" belongs to all three. Which one you meant depends
+   * on WHERE you clicked, so Word tells us how each term's range sits
+   * relative to the cursor and this picks the winner.
+   *
+   * Pure, so it can be tested without Word: app.js passes the relation names
+   * Word produced.
+   * --------------------------------------------------------------------- */
+
+  /* How a found range sits relative to the cursor, as Word reports it from
+   * the found range's point of view. Lower is a tighter match. Anything not
+   * listed (Before, After, Unrelated) means the cursor is elsewhere. */
+  var RELATION_RANK = {
+    Equal: 0, Contains: 0,
+    ContainsStart: 1, ContainsEnd: 1,
+    Inside: 2, InsideStart: 2, InsideEnd: 2,
+    OverlapsBefore: 3, OverlapsAfter: 3,
+    AdjacentBefore: 4, AdjacentAfter: 4
+  };
+
+  /**
+   * @param {Array} comparisons - [{ entry, surface, relation }] where
+   *        relation is a Word LocationRelation name.
+   * @returns {object|null} { entry, others, ranked }
+   */
+  function resolveOverlaps(comparisons) {
+    var ranked = [];
+    for (var i = 0; i < comparisons.length; i++) {
+      var c = comparisons[i];
+      var rank = RELATION_RANK[c.relation];
+      if (rank === undefined) continue;
+      ranked.push({ rank: rank, entry: c.entry, surface: c.surface });
+    }
+    // Tighter relation wins; ties go to the longer matched text, so a cursor
+    // inside "Business Employees" resolves there and not to "Business".
+    ranked.sort(function (a, b) {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return b.surface.length - a.surface.length;
+    });
+    if (!ranked.length) return null;
+
+    // The other terms sitting at this spot, so an ambiguous click offers
+    // both rather than quietly choosing one.
+    var seen = {}, others = [];
+    seen[ranked[0].entry.key] = true;
+    for (i = 1; i < ranked.length && others.length < 4; i++) {
+      var e = ranked[i].entry;
+      if (seen[e.key] || ranked[i].rank > 2) continue;
+      seen[e.key] = true;
+      others.push(e);
+    }
+    return { entry: ranked[0].entry, others: others, ranked: ranked };
+  }
+
   root.DefinedTerms = {
     buildIndex: buildIndex,
     findSuspects: findSuspects,
+    resolveOverlaps: resolveOverlaps,
     lookup: lookup,
     candidatesIn: candidatesIn,
     matchSelectionText: matchSelectionText,
