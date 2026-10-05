@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defined — pattern test bench</title>
+<style>
+  :root { --line:#dfe1e8; --dim:#5c6070; --accent:#1f3a5f; --amber:#f2b24c; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; max-width:1100px; margin-inline:auto;
+         font-family:"Segoe UI",system-ui,sans-serif; font-size:14px;
+         line-height:1.45; color:#1b1b1f; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h1 span { border-bottom:3px solid var(--amber); }
+  h2 { font-size:15px; margin:24px 0 8px; }
+  p.lede { color:var(--dim); margin:0 0 16px; }
+  textarea { width:100%; height:220px; padding:10px; font-family:Consolas,monospace;
+             font-size:12.5px; border:1px solid var(--line); border-radius:6px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0; }
+  button { font:inherit; font-size:13px; padding:6px 14px; color:#fff;
+           background:var(--accent); border:0; border-radius:6px; cursor:pointer; }
+  button.ghost { background:#eef0f4; color:#1b1b1f; }
+  input[type=text] { font:inherit; padding:6px 8px; border:1px solid var(--line);
+                     border-radius:6px; }
+  .stats { background:#f6f7f9; border:1px solid var(--line); border-radius:6px;
+           padding:10px 12px; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th,td { text-align:left; vertical-align:top; padding:6px 8px;
+          border-bottom:1px solid var(--line); font-size:13px; }
+  th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--dim); }
+  td.term { font-weight:600; white-space:nowrap; }
+  td.def { color:#333; }
+  .badge { display:inline-block; font-size:10.5px; font-weight:600; padding:1px 6px;
+           border-radius:10px; background:#e8eef7; color:var(--accent);
+           text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
+  .badge.weak { background:#eee; color:var(--dim); }
+  .rejected td { color:var(--dim); }
+  details { margin-top:8px; }
+  summary { cursor:pointer; font-weight:600; }
+  mark { background:#fff3cd; }
+  code { background:#f0f1f4; padding:1px 4px; border-radius:3px; font-size:12px; }
+</style>
+</head>
+<body>
+
+<h1><span>Defined</span> — pattern test bench</h1>
+<p class="lede">
+  Paste text from a real agreement, press <strong>Parse</strong>, and check what
+  gets found. This page never touches Word, so you can tune the patterns in
+  <code>terms.js</code>, refresh, and try again in seconds. Nothing is uploaded —
+  it all runs in this browser tab.
+</p>
+
+<p class="lede">
+  <strong>Getting text out of a PDF from EDGAR:</strong> open the filing, select
+  all, copy, and paste below. Each line break starts a new paragraph, which is
+  how the add-in sees the document too.
+</p>
+
+<textarea id="input" spellcheck="false"></textarea>
+
+<div class="row">
+  <button id="parse">Parse</button>
+  <button id="sample" class="ghost">Load sample text</button>
+  <button id="clear" class="ghost">Clear</button>
+</div>
+
+<div id="stats" class="stats">Not parsed yet.</div>
+
+<h2>Terms found</h2>
+<table id="found">
+  <thead><tr><th>Term</th><th>Pattern</th><th>Points to</th><th>Definition</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>Quoted text that was <em>not</em> indexed</h2>
+<p class="lede">
+  Check this list for definitions the patterns missed. Ordinary quotations
+  belong here; defined terms do not.
+</p>
+<table id="rejected">
+  <thead><tr><th>Quoted text</th><th>Why skipped</th><th>Context</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>Click simulator</h2>
+<p class="lede">
+  Type a word you might double-click in the document, and the paragraph number
+  it sits in (from the table above). This checks the same matching logic the
+  add-in uses for a double-click.
+</p>
+<div class="row">
+  <input type="text" id="simWord" placeholder="e.g. Adverse" size="24">
+  <input type="text" id="simPara" placeholder="paragraph no. (optional)" size="20">
+  <button id="simRun" class="ghost">Resolve</button>
+  <span id="simOut"></span>
+</div>
+
+<script src="terms.js?v=1"></script>
+<script>
+(function () {
+  'use strict';
+  var T = window.DefinedTerms;
+  var index = null, paras = [];
+
+  var SAMPLE = [
+    '1.01 Defined Terms. As used in this Agreement, the following terms have the meanings specified below:',
+    '“Applicable Rate” means, for any day, with respect to any ABR Loan, the applicable rate per annum set forth in the Pricing Grid under the caption “ABR Spread”.',
+    '“Business Day” means any day except a Saturday, Sunday or other day on which commercial banks in New York City are authorized or required by law to remain closed.',
+    '“Material Adverse Effect” means a material adverse effect on (a) the business, assets, operations or financial condition of the Borrower and the Subsidiaries taken as a whole, (b) the ability of any Loan Party to perform any of its obligations under the Loan Documents, or (c) the rights of or benefits available to the Lenders under the Loan Documents.',
+    '“EBITDA” shall mean, for any period, Consolidated Net Income for such period plus, without duplication and to the extent deducted in computing Consolidated Net Income, (i) interest expense, (ii) income tax expense and (iii) depreciation and amortization. For the avoidance of doubt, EBITDA excludes extraordinary gains.',
+    '“Disposition” has the meaning assigned to such term in Section 6.05.',
+    '“Permitted Encumbrances” shall have the meanings ascribed thereto in Clause 1.1(b) of the Intercreditor Agreement.',
+    'THIS CREDIT AGREEMENT is entered into among ACME HOLDINGS, INC., a Delaware corporation (the “Borrower”), the Lenders party hereto, and GLOBAL BANK, N.A., as administrative agent (in such capacity, the “Administrative Agent”).',
+    'The Borrower shall deliver to the Administrative Agent financial statements accompanied by a certificate of a Financial Officer (a “Compliance Certificate”) within 90 days after the end of each fiscal year.',
+    'Each of the Lenders, the Issuing Bank and the Administrative Agent (collectively, the “Secured Parties”) shall be entitled to the benefit of the Collateral.',
+    'The Administrative Agent shall deliver notice to the party specified on Schedule 1 (as defined below, the “Notice Party”) promptly following any such determination.',
+    'The parties agree that “time is of the essence” with respect to each payment obligation hereunder.',
+    'No Loan Party shall “double count” any amount in any calculation made under this Section 6.12.',
+    'Reference is made to the “Credit Agreement” dated as of March 1, 2024, among the parties hereto.',
+    '“2026 Notes” means the 5.25% senior unsecured notes due 2026 issued by the Borrower under the 2026 Notes Indenture.'
+  ].join('\n');
+
+  var KIND_LABEL = { means:'means', crossref:'cross-reference',
+                     inline:'inline', 'inline?':'inline (uncertain)' };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function clip(s, n) {
+    var t = String(s).replace(/\s+/g,' ');
+    return t.length > n ? t.slice(0, n-1) + '…' : t;
+  }
+
+  function parse() {
+    paras = document.getElementById('input').value.split(/\n+/)
+      .map(function (s) { return s.replace(/^\s+|\s+$/g,''); })
+      .filter(function (s) { return s.length > 0; });
+
+    var t0 = performance.now();
+    index = T.buildIndex(paras);
+    var ms = (performance.now() - t0).toFixed(1);
+
+    var byKind = {};
+    index.terms.forEach(function (t) { byKind[t.kind] = (byKind[t.kind]||0) + 1; });
+    var breakdown = Object.keys(byKind).sort().map(function (k) {
+      return (KIND_LABEL[k]||k) + ': ' + byKind[k];
+    }).join(' · ') || 'none';
+
+    document.getElementById('stats').innerHTML =
+      '<strong>' + index.terms.length + ' terms</strong> from ' +
+      paras.length + ' paragraphs (' + index.paragraphsWithQuotes +
+      ' contained quote marks) in ' + ms + ' ms.<br>' + esc(breakdown);
+
+    renderFound();
+    renderRejected();
+  }
+
+  function renderFound() {
+    var rows = index.terms.map(function (t) {
+      var weak = t.confidence < 2 ? ' weak' : '';
+      return '<tr>' +
+        '<td class="term">' + esc(t.term) + '</td>' +
+        '<td><span class="badge' + weak + '">' + esc(KIND_LABEL[t.kind]||t.kind) + '</span></td>' +
+        '<td>' + esc(t.pointer || '—') + '</td>' +
+        '<td class="def">' + esc(clip(t.text, 220)) +
+          '<br><small style="color:#5c6070">para ' + (t.paragraph+1) +
+          (t.alternates.length ? ' · ' + t.alternates.length + ' other definition(s)' : '') +
+          '</small></td>' +
+      '</tr>';
+    }).join('');
+    document.querySelector('#found tbody').innerHTML =
+      rows || '<tr><td colspan="4">Nothing found.</td></tr>';
+  }
+
+  /* Re-walk the quoted spans and show the ones buildIndex threw away, with the
+     reason. This is where you spot patterns that need adding. */
+  function renderRejected() {
+    var internals = T._internals;
+    var re = internals.QUOTED_RE;
+    var rows = [];
+
+    for (var i = 0; i < paras.length; i++) {
+      var text = paras[i];
+      re.lastIndex = 0;
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        var span = { start: m.index, end: m.index + m[0].length };
+        var hit = internals.classify(text, span);
+        var reason = null;
+        if (!hit) {
+          reason = 'no defining pattern after or before the quote';
+        } else if (!internals.isPlausibleTerm(m[1], hit.kind)) {
+          reason = 'matched "' + (KIND_LABEL[hit.kind]||hit.kind) +
+                   '" but rejected as implausible';
+        }
+        if (!reason) continue;
+
+        var ctxStart = Math.max(0, span.start - 45);
+        var context = esc(text.slice(ctxStart, span.start)) +
+                      '<mark>' + esc(m[0]) + '</mark>' +
+                      esc(text.slice(span.end, span.end + 45));
+        rows.push('<tr class="rejected"><td>' + esc(clip(m[1], 50)) + '</td>' +
+                  '<td>' + esc(reason) + '</td>' +
+                  '<td><small>…' + context + '…</small></td></tr>');
+      }
+    }
+    document.querySelector('#rejected tbody').innerHTML =
+      rows.join('') || '<tr><td colspan="3">Every quoted span was indexed.</td></tr>';
+  }
+
+  function simulate() {
+    var out = document.getElementById('simOut');
+    if (!index) { out.textContent = 'Parse something first.'; return; }
+    var word = document.getElementById('simWord').value;
+    var pn = parseInt(document.getElementById('simPara').value, 10);
+    var paraText = (!isNaN(pn) && paras[pn-1]) ? paras[pn-1] : '';
+    var r = T.matchSelectionText(word, index, paraText);
+    out.innerHTML = r
+      ? '→ <strong>' + esc(r.term) + '</strong> <span class="badge">' +
+        esc(KIND_LABEL[r.kind]||r.kind) + '</span>'
+      : '→ no match';
+  }
+
+  document.getElementById('parse').addEventListener('click', parse);
+  document.getElementById('simRun').addEventListener('click', simulate);
+  document.getElementById('sample').addEventListener('click', function () {
+    document.getElementById('input').value = SAMPLE;
+    parse();
+  });
+  document.getElementById('clear').addEventListener('click', function () {
+    document.getElementById('input').value = '';
+    document.getElementById('stats').textContent = 'Not parsed yet.';
+    document.querySelector('#found tbody').innerHTML = '';
+    document.querySelector('#rejected tbody').innerHTML = '';
+  });
+
+  document.getElementById('input').value = SAMPLE;
+  parse();
+})();
+</script>
+</body>
+</html>

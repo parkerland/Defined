@@ -1,0 +1,7 @@
+# Local Claude Code settings — machine-specific, not part of the add-in.
+.claude/
+
+# Windows / editor noise
+Thumbs.db
+desktop.ini
+*.swp

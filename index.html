@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Defined</title>
+  <!-- Office.js must be loaded from Microsoft's CDN; this is how every add-in
+       works. It carries no document content. See README "Privacy". -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css?v=1">
+</head>
+<body>
+
+  <header class="bar">
+    <div class="bar-main">
+      <h1>Defined</h1>
+      <button id="refresh" type="button" class="btn" title="Re-scan the document">Refresh</button>
+    </div>
+    <div class="bar-sub">
+      <span id="status">Starting…</span>
+      <label class="toggle">
+        <input type="checkbox" id="follow" checked>
+        <span>Follow cursor</span>
+      </label>
+    </div>
+  </header>
+
+  <section id="definition" class="definition">
+    <div class="empty">
+      <p><strong>Click a defined term in the document.</strong></p>
+      <p>Its definition appears here. If a single click doesn't catch it,
+         double-click the word instead.</p>
+    </div>
+  </section>
+
+  <section class="browse">
+    <input type="search" id="search" class="search" placeholder="Search terms…"
+           autocomplete="off" spellcheck="false">
+    <div id="count" class="count"></div>
+    <ul id="list" class="list"></ul>
+  </section>
+
+  <details class="diag">
+    <summary>Diagnostics</summary>
+    <div id="diag-body">Nothing yet.</div>
+  </details>
+
+  <script src="terms.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
