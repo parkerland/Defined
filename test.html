@@ -105,6 +105,10 @@
   usually because the term isn&rsquo;t in quotes. <strong>These are parser
   bugs.</strong> Send me the sentence and I&rsquo;ll add the pattern.
 </p>
+<div class="row">
+  <button id="copyA" class="ghost">Copy group A to clipboard</button>
+  <span id="copyAOut" style="color:var(--dim)"></span>
+</div>
 <table id="missed">
   <thead><tr><th>Phrase</th><th>Times</th><th>Apparent defining sentence</th></tr></thead>
   <tbody></tbody>
@@ -137,7 +141,7 @@
   <span id="simOut"></span>
 </div>
 
-<script src="terms.js?v=2"></script>
+<script src="terms.js?v=3"></script>
 <script>
 (function () {
   'use strict';
@@ -299,6 +303,62 @@
 
   document.getElementById('parse').addEventListener('click', parse);
   document.getElementById('rescan').addEventListener('click', renderSuspects);
+
+  /* Copy group A as plain text, ready to paste straight into a chat. */
+  document.getElementById('copyA').addEventListener('click', function () {
+    var out = document.getElementById('copyAOut');
+    if (!index) { out.textContent = 'Parse something first.'; return; }
+    var min = parseInt(document.getElementById('minCount').value, 10);
+    if (isNaN(min) || min < 1) min = 1;
+    var A = T.findSuspects(paras, index, { minCount: min })
+             .filter(function (s) { return s.defining; });
+
+    if (!A.length) {
+      out.textContent = 'Group A is empty — nothing to copy.';
+      return;
+    }
+    var text = 'GROUP A — apparent definitions the parser missed (' +
+               A.length + ' of ' + index.terms.length + ' indexed terms, ' +
+               paras.length + ' paragraphs)\n\n' +
+               A.map(function (s) {
+                 return '* ' + s.phrase + '  (' + s.count + ' uses, para ' +
+                        (s.paragraph + 1) + ')\n    ' + s.sample;
+               }).join('\n\n');
+
+    copyText(text, function (ok) {
+      out.textContent = ok
+        ? 'Copied ' + A.length + ' entries — paste them to Claude.'
+        : 'Copy failed; select the table manually.';
+    });
+  });
+
+  /* navigator.clipboard needs a secure context and isn't available everywhere,
+     so fall back to the old execCommand trick. */
+  function copyText(text, done) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(function () { done(true); })
+        .catch(function () { done(legacyCopy(text)); });
+      return;
+    }
+    done(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
   document.getElementById('simRun').addEventListener('click', simulate);
   document.getElementById('sample').addEventListener('click', function () {
     document.getElementById('input').value = SAMPLE;
