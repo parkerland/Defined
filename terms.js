@@ -286,9 +286,25 @@
     }
     terms.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
 
+    /* Surface forms. byVariant never shadows a term's own key, so when
+     * "Lender" and "Lenders" are both defined each keeps its own entry. */
+    var byVariant = {};
+    var surfaces = [];
+    for (var t = 0; t < terms.length; t++) {
+      terms[t].variants = variantsFor(terms[t].term);
+      for (var v = 0; v < terms[t].variants.length; v++) {
+        var vk = keyFor(terms[t].variants[v]);
+        if (!byKey[vk] && !byVariant[vk]) byVariant[vk] = terms[t];
+        surfaces.push(terms[t].variants[v].toLowerCase());
+      }
+    }
+    surfaces.sort(function (a, b) { return b.length - a.length; });
+
     return {
       terms: terms,
       byKey: byKey,
+      byVariant: byVariant,
+      surfaces: surfaces,
       paragraphCount: list.length,
       paragraphsWithQuotes: scanned,
       scannedAt: new Date()
@@ -322,66 +338,147 @@
     }
   }
 
+  /* --------------------------------------------------------------------- *
+   * Surface forms
+   *
+   * A term is defined once but written several ways. "Business Employee(s)"
+   * is defined with the bracketed notation and then used as "Business
+   * Employees"; "Subsidiary" is used as "Subsidiaries". Matching only the
+   * literal defined form means clicking the word in the document finds
+   * nothing, and the missed-term diagnostic reports the plural as unknown.
+   *
+   * So each entry carries the set of surface forms it may appear as. These
+   * are what we search the document for, not the term itself.
+   * --------------------------------------------------------------------- */
+
+  function pluralise(w) {
+    if (/[^aeiouAEIOU]y$/.test(w)) return w.slice(0, -1) + 'ies';
+    if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
+    return w + 's';
+  }
+
+  function singulariseWord(w) {
+    if (/ies$/i.test(w) && w.length > 4) return w.slice(0, -3) + 'y';
+    if (/(sses|xes|zes|ches|shes)$/i.test(w)) return w.slice(0, -2);
+    if (/s$/i.test(w) && !/ss$/i.test(w)) return w.slice(0, -1);
+    return w;
+  }
+
+  function looksPlural(w) {
+    return singulariseWord(w) !== w;
+  }
+
+  /** Every way this term might be written in the document. */
+  function variantsFor(term) {
+    var out = [];
+    function add(s) {
+      s = collapseSpace(s);
+      if (s && out.length < 8 && out.indexOf(s) === -1) out.push(s);
+    }
+
+    add(term);
+
+    // "Business Employee(s)" -> "Business Employee" and "Business Employees"
+    if (term.indexOf('(') !== -1) {
+      add(term.replace(/\((s|es)\)/gi, ''));
+      add(term.replace(/\((s|es)\)/gi, '$1'));
+    }
+
+    // Plural and singular of the final word, for each form so far.
+    var base = out.slice();
+    for (var i = 0; i < base.length; i++) {
+      var t = base[i];
+      if (t.indexOf('(') !== -1) continue;        // notation, not a real form
+      var m = t.match(/^(.*?)([A-Za-z]+)$/);
+      if (!m) continue;
+      var head = m[1], last = m[2];
+      if (looksPlural(last)) add(head + singulariseWord(last));
+      else add(head + pluralise(last));
+    }
+    return out;
+  }
+
   /* --------------------------------------------------------------------- */
   /* Lookup helpers — used by the click-to-define path in app.js             */
   /* --------------------------------------------------------------------- */
 
+  function normaliseForLookup(text) {
+    return collapseSpace(text).replace(/[’']s$/, '');   // drop possessive
+  }
+
   function lookup(index, text) {
     if (!index) return null;
-    var e = index.byKey[keyFor(text)];
-    return e || null;
+    var k = keyFor(normaliseForLookup(text));
+    return index.byKey[k] || index.byVariant[k] || null;
   }
 
   /**
-   * Which indexed terms literally appear in this paragraph?
-   * Longest first, so "Material Adverse Effect" beats "Material" when both
-   * ranges contain the caret.
+   * Which indexed terms appear in this paragraph, and in what form?
+   * Returns { entry, surface } so the caller can search the document for the
+   * text actually present. Longest surface first, so "Material Adverse
+   * Effect" beats "Material" when both ranges contain the caret.
    */
   function candidatesIn(paraText, index) {
     if (!index || !paraText) return [];
     var out = [];
     for (var i = 0; i < index.terms.length; i++) {
       var t = index.terms[i];
-      if (paraText.indexOf(t.term) !== -1) out.push(t);
+      for (var j = 0; j < t.variants.length; j++) {
+        if (paraText.indexOf(t.variants[j]) !== -1) {
+          out.push({ entry: t, surface: t.variants[j] });
+        }
+      }
     }
-    out.sort(function (a, b) { return b.term.length - a.term.length; });
+    out.sort(function (a, b) { return b.surface.length - a.surface.length; });
+    return out;
+  }
+
+  function allSurfaces(index) {
+    var out = [];
+    for (var i = 0; i < index.terms.length; i++) {
+      for (var j = 0; j < index.terms[i].variants.length; j++) {
+        out.push({ entry: index.terms[i], surface: index.terms[i].variants[j] });
+      }
+    }
     return out;
   }
 
   /**
    * Resolve selected text (a double-click, or a dragged selection) to a term.
-   * Tries exact match, then the longest indexed term in this paragraph that
-   * contains the selection, then the longest term inside the selection.
+   * Tries exact match, then the longest surface form in this paragraph that
+   * contains the selection, then the longest surface inside the selection.
    */
   function matchSelectionText(selText, index, paraText) {
-    var sel = collapseSpace(selText);
+    var sel = normaliseForLookup(selText);
     if (!sel || !index) return null;
 
     var exact = lookup(index, sel);
     if (exact) return exact;
 
-    var pool = paraText ? candidatesIn(paraText, index) : index.terms;
+    var pool = paraText ? candidatesIn(paraText, index) : allSurfaces(index);
     var word = new RegExp('(^|[^A-Za-z0-9])' + escapeRegExp(sel) + '([^A-Za-z0-9]|$)', 'i');
     var i;
+
+    function longestFirst(a, b) { return b.surface.length - a.surface.length; }
 
     // The selection is one word of a longer term: "Adverse" -> "Material Adverse Effect"
     var containing = [];
     for (i = 0; i < pool.length; i++) {
-      if (word.test(pool[i].term)) containing.push(pool[i]);
+      if (word.test(pool[i].surface)) containing.push(pool[i]);
     }
     if (containing.length) {
-      containing.sort(function (a, b) { return b.term.length - a.term.length; });
-      return containing[0];
+      containing.sort(longestFirst);
+      return containing[0].entry;
     }
 
     // The selection spans more than the term: pick the longest term inside it.
     var inside = [];
     for (i = 0; i < pool.length; i++) {
-      if (sel.indexOf(pool[i].term) !== -1) inside.push(pool[i]);
+      if (sel.indexOf(pool[i].surface) !== -1) inside.push(pool[i]);
     }
     if (inside.length) {
-      inside.sort(function (a, b) { return b.term.length - a.term.length; });
-      return inside[0];
+      inside.sort(longestFirst);
+      return inside[0].entry;
     }
     return null;
   }
@@ -437,12 +534,6 @@
     return re.test(sentence);
   }
 
-  function singularise(key) {
-    if (/ies$/.test(key)) return key.slice(0, -3) + 'y';
-    if (/ses$/.test(key)) return key.slice(0, -2);
-    if (/s$/.test(key) && !/ss$/.test(key)) return key.slice(0, -1);
-    return key;
-  }
 
   /**
    * Capitalised phrases that the index does not explain.
@@ -548,15 +639,59 @@
 
     if (!index) return true;
 
-    // Already defined, in singular or plural form.
-    if (index.byKey[key]) return false;
-    var sing = singularise(key);
-    if (sing !== key && index.byKey[sing]) return false;
+    // Already defined, in any of its surface forms — this is what stops
+    // "Business Employees" being reported when "Business Employee(s)" is
+    // the defined term.
+    if (index.byKey[key] || index.byVariant[key]) return false;
 
     // Part of a longer defined term: "Material Adverse" inside
     // "Material Adverse Effect" is not a separate miss.
     for (var i = 0; i < index.terms.length; i++) {
       if (index.terms[i].key.indexOf(key) !== -1) return false;
+    }
+
+    // Two defined terms joined by a conjunction: "Buyer and Seller" is not a
+    // third term, it is Buyer and Seller.
+    if (accountedFor(key, index)) return false;
+
+    return true;
+  }
+
+  /* Words that may be left over once known terms are removed from a phrase
+   * without it counting as something new.
+   *
+   * "other" is deliberately absent: Other Taxes is a real defined term, and
+   * treating "other" as noise would suppress it as a suspect whenever Taxes
+   * alone is indexed — hiding exactly the kind of miss this is meant to find.
+   * Leading each/any/all/such are already removed by cleanPhrase, so they only
+   * appear here mid-phrase, where they are connective. */
+  var JOINING_WORDS = ('and or the a an of to in for on each any all both such '
+    + 'its their respective').split(' ');
+
+  /**
+   * Can this phrase be explained entirely by known terms plus joining words?
+   * "buyer and seller" -> remove "buyer", remove "seller" -> "and" -> yes.
+   * "administrative agent fee letter" -> leaves "fee letter" -> no.
+   */
+  function accountedFor(key, index) {
+    var remaining = ' ' + key + ' ';
+    var removed = false;
+
+    for (var i = 0; i < index.surfaces.length; i++) {
+      if (index.surfaces[i].length > key.length) continue;   // too long to be a part
+      var s = ' ' + index.surfaces[i] + ' ';
+      while (remaining.indexOf(s) !== -1) {
+        remaining = remaining.replace(s, ' ');
+        removed = true;
+      }
+    }
+    if (!removed) return false;
+
+    var rest = collapseSpace(remaining);
+    if (!rest) return true;
+    var words = rest.split(' ');
+    for (i = 0; i < words.length; i++) {
+      if (JOINING_WORDS.indexOf(words[i]) === -1) return false;
     }
     return true;
   }

@@ -19,7 +19,8 @@
   var lastError = null;
 
   var MAX_LISTED = 300;      // cap list rendering so typing stays snappy
-  var MAX_CANDIDATES = 12;   // per-paragraph Word searches per click
+  var MAX_CANDIDATES = 18;   // per-paragraph Word searches per click
+                             // (a term contributes several surface forms)
   var DEBOUNCE_MS = 180;
 
   var el = {};
@@ -156,6 +157,9 @@
          * ask Word to find the ones present in this paragraph and report which
          * of their ranges contains the cursor. Multi-word terms like
          * "Material Adverse Effect" fall out of this for free. */
+        /* candidatesIn returns { entry, surface }: the surface is the form the
+         * text actually uses, which is what Word must search for. A term
+         * defined as "Business Employee(s)" is written "Business Employees". */
         var candidates = DefinedTerms.candidatesIn(paraText, index)
           .filter(searchable)
           .slice(0, MAX_CANDIDATES);
@@ -168,10 +172,11 @@
         ctx.trackedObjects.add(para);
         ctx.trackedObjects.add(sel);
 
-        var searches = candidates.map(function (entry) {
+        var searches = candidates.map(function (c) {
           return {
-            entry: entry,
-            results: para.search(entry.term, { matchCase: true })
+            entry: c.entry,
+            surface: c.surface,
+            results: para.search(c.surface, { matchCase: true })
           };
         });
         searches.forEach(function (s) { s.results.load('items/text'); });
@@ -182,6 +187,7 @@
             s.results.items.forEach(function (hit) {
               comparisons.push({
                 entry: s.entry,
+                surface: s.surface,
                 relation: hit.compareLocationWith(sel)
               });
             });
@@ -231,11 +237,11 @@
       var c = comparisons[i];
       var rank = RELATION_RANK[c.relation.value];
       if (rank === undefined) continue;
-      // Tighter relation wins; ties go to the longer term, so clicking inside
-      // "Material Adverse Effect" never resolves to "Material".
+      // Tighter relation wins; ties go to the longer matched text, so clicking
+      // inside "Material Adverse Effect" never resolves to "Material".
       if (!best || rank < best.rank ||
-          (rank === best.rank && c.entry.term.length > best.entry.term.length)) {
-        best = { rank: rank, entry: c.entry };
+          (rank === best.rank && c.surface.length > best.surface.length)) {
+        best = { rank: rank, entry: c.entry, surface: c.surface };
       }
     }
     return best ? best.entry : null;
@@ -243,8 +249,8 @@
 
   /* Word's search treats ^ as an escape character and caps the string at 255
    * characters, so skip anything it would choke on. */
-  function searchable(entry) {
-    return entry.term.length <= 200 && entry.term.indexOf('^') === -1;
+  function searchable(candidate) {
+    return candidate.surface.length <= 200 && candidate.surface.indexOf('^') === -1;
   }
 
   /* ===================================================================

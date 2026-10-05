@@ -155,8 +155,110 @@ definesNothing('quoted sentence',
 })();
 
 /* ------------------------------------------------------------------ *
+ * 6b. Surface forms — a term is defined once but written many ways    *
+ * ------------------------------------------------------------------ */
+(function bracketedPluralNotation() {
+  const paras = [
+    '“Business Employee(s)” means each employee of the Business listed on Schedule 2.',
+    'The Buyer shall offer employment to the Business Employees on the Closing Date.'
+  ];
+  const idx = T.buildIndex(paras);
+  const e = idx.byKey['business employee(s)'];
+  check('"Business Employee(s)" is indexed', !!e);
+
+  check('clicking "Business Employees" resolves to it',
+        (T.matchSelectionText('Business Employees', idx, paras[1]) || {}).term === 'Business Employee(s)',
+        `got ${JSON.stringify((T.matchSelectionText('Business Employees', idx, paras[1]) || {}).term)}`);
+  check('clicking the singular resolves too',
+        (T.matchSelectionText('Business Employee', idx, paras[1]) || {}).term === 'Business Employee(s)');
+
+  const surfaces = T.candidatesIn(paras[1], idx).map(c => c.surface);
+  check('the plural is offered as a searchable surface form',
+        surfaces.indexOf('Business Employees') !== -1, `got [${surfaces.join(', ')}]`);
+
+  const sus = T.findSuspects(paras, idx, { minCount: 1 }).map(s => s.phrase);
+  check('the plural is not reported as an unknown phrase',
+        sus.indexOf('Business Employees') === -1, `got [${sus.join(', ')}]`);
+})();
+
+(function ordinaryPlurals() {
+  const idx = T.buildIndex([
+    '“Subsidiary” means any entity controlled by the Borrower.',
+    '“Party” means a party to this Agreement.'
+  ]);
+  const para = 'The Subsidiaries and the Parties shall comply.';
+  check('Subsidiaries -> Subsidiary',
+        (T.matchSelectionText('Subsidiaries', idx, para) || {}).term === 'Subsidiary');
+  check('Parties -> Party',
+        (T.matchSelectionText('Parties', idx, para) || {}).term === 'Party');
+})();
+
+(function singularOfAPluralTerm() {
+  const idx = T.buildIndex(['“Loan Documents” means this Agreement and each Note.']);
+  check('Loan Document -> Loan Documents',
+        (T.matchSelectionText('Loan Document', idx, 'Each Loan Document is binding.') || {}).term
+          === 'Loan Documents');
+})();
+
+(function possessiveIsStripped() {
+  const idx = T.buildIndex(['“Borrower” means ACME INC., a Delaware corporation.']);
+  check("Borrower's -> Borrower",
+        (T.matchSelectionText('Borrower’s', idx, 'The Borrower’s obligations.') || {}).term
+          === 'Borrower');
+})();
+
+(function distinctTermsKeepTheirOwnEntries() {
+  // "Lender" and "Lenders" defined separately must not collapse into one.
+  const idx = T.buildIndex([
+    '“Lender” means each financial institution party hereto.',
+    '“Lenders” means all of the Lender parties collectively.'
+  ]);
+  check('a variant never shadows another term\'s own definition',
+        (T.lookup(idx, 'Lender') || {}).term === 'Lender' &&
+        (T.lookup(idx, 'Lenders') || {}).term === 'Lenders');
+})();
+
+/* ------------------------------------------------------------------ *
  * 7. Suspects — the missed-term diagnostic                            *
  * ------------------------------------------------------------------ */
+(function conjoinedTermsAreNotNewTerms() {
+  const paras = [
+    'This Agreement is between ACME INC. (the “Buyer”) and BETA LLC (the “Seller”).',
+    'The Buyer and Seller shall cooperate. Seller and Buyer each bear their own costs.',
+    'Buyer and Seller agree to the allocation.'
+  ];
+  const idx = T.buildIndex(paras);
+  const sus = T.findSuspects(paras, idx, { minCount: 1 }).map(s => s.phrase);
+  check('"Buyer and Seller" is not reported as an unknown phrase',
+        sus.indexOf('Buyer and Seller') === -1, `got [${sus.join(', ')}]`);
+  check('"Seller and Buyer" is not reported either',
+        sus.indexOf('Seller and Buyer') === -1, `got [${sus.join(', ')}]`);
+})();
+
+(function compoundsAreStillReported() {
+  // Removing a known term must not explain away a genuinely different phrase.
+  const paras = [
+    '“Administrative Agent” means GLOBAL BANK, N.A.',
+    'The Administrative Agent Fee Letter sets out the fees. See the Administrative Agent Fee Letter.'
+  ];
+  const idx = T.buildIndex(paras);
+  const sus = T.findSuspects(paras, idx, { minCount: 1 }).map(s => s.phrase);
+  check('"Administrative Agent Fee Letter" is still a suspect',
+        sus.indexOf('Administrative Agent Fee Letter') !== -1, `got [${sus.join(', ')}]`);
+})();
+
+(function otherTaxesIsNotExplainedAway() {
+  // "other" must not count as noise, or a real missed term disappears.
+  const paras = [
+    '“Taxes” means all present and future taxes imposed by any Governmental Authority.',
+    'The Borrower shall pay all Other Taxes when due. Other Taxes are indemnified separately.'
+  ];
+  const idx = T.buildIndex(paras);
+  const sus = T.findSuspects(paras, idx, { minCount: 1 }).map(s => s.phrase);
+  check('"Other Taxes" survives as a suspect',
+        sus.indexOf('Other Taxes') !== -1, `got [${sus.join(', ')}]`);
+})();
+
 (function suspectsFindUnquoted() {
   const paras = [
     '“Business Day” means any day except a Saturday or Sunday.',

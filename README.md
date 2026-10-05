@@ -158,6 +158,11 @@ After this, the add-in appears on the **Home** tab as a **Defined terms** button
 - **Diagnostics** (at the bottom) — scan timings and any errors. Expand this
   first if something looks wrong.
 
+A term is matched in every form it might be written: plurals
+("Subsidiaries" finds "Subsidiary"), singulars ("Loan Document" finds "Loan
+Documents"), possessives ("Borrower's"), and the bracketed notation drafters
+use ("Business Employees" finds "Business Employee(s)").
+
 Each definition is tagged with how it was found:
 
 | Tag | Meaning |
@@ -208,7 +213,6 @@ console. On desktop, right-click inside the task pane and choose **Inspect**.
 
 Deliberately left out, to be added once the basics are solid:
 
-- Plural and possessive matching ("Subsidiaries" → "Subsidiary")
 - Clickable nested terms inside a definition
 - Go-to-definition (jump to where the term is defined)
 - Following `has the meaning given in Clause X` through to the actual text
